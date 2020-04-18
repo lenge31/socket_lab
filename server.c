@@ -98,7 +98,7 @@ static void *pthread_routine_client(void *arg)
 				}
 			} else {//client
 				for (i=0; i<MAX_CONNECT_COUNT; i++) {
-					if (FD_ISSET(client_infos[i].accept_sfd, &rfds)) {
+					if (client_infos[i].accept_sfd >=0 && FD_ISSET(client_infos[i].accept_sfd, &rfds)) {
 						memset(recv_buf, 0, MAX_MSG_SIZE);
 						ret = recv(client_infos[i].accept_sfd, recv_buf, MAX_MSG_SIZE, 0);
 						if (ret == 0) {

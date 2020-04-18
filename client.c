@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <byteswap.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -16,7 +17,7 @@
 
 static int client_sfd = -1;
 static struct sockaddr_in client_addr = {0, 0, {0x0}};
-struct sockaddr_in server_addr = {AF_INET, 0xE407, {0x692AA8C0}};
+struct sockaddr_in server_addr = {AF_INET, 0xE407, {0x0}};
 static int ADDRLEN = sizeof(struct sockaddr_in);
 
 #define MAX_MSG_SIZE (1024*1024)
@@ -28,6 +29,16 @@ int main(int argc, char *argv[])
 	char *recv_buf = NULL;
 	struct timeval tv;
 	fd_set rfds;
+	unsigned int port, addr_1, addr_2, addr_3, addr_4;
+
+	if (argc == 2) {
+		sscanf(argv[1], "%d.%d.%d.%d:%d", &addr_1, &addr_2, &addr_3, &addr_4, &port);
+		server_addr.sin_addr.s_addr = ((addr_4&0xff)<<24)|((addr_3&0xff)<<16)|((addr_2&0xff)<<8)|(addr_1&0xff);
+		server_addr.sin_port = bswap_16(port);
+	}
+
+	print_i("server_addr(.sin_family=%d, .sin_port=%d, .sin_addr=0x%x).\n",
+			server_addr.sin_family, ntohs(server_addr.sin_port), server_addr.sin_addr.s_addr);
 
 	client_sfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (client_sfd == -1) {
@@ -93,7 +104,7 @@ int main(int argc, char *argv[])
 				}
 			}
 		} else {
-			print_i("No data, errno{%d:%s}.\n", errno, strerror(errno));
+			//print_i("No data, errno{%d:%s}.\n", errno, strerror(errno));
 		}
 	}
 

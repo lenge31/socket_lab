@@ -53,7 +53,7 @@ static void *pthread_routine_client(void *arg)
 	}
 
 	while (1) {
-		tv.tv_sec = 180;
+		tv.tv_sec = 1;
 		tv.tv_usec = 0;
 		FD_ZERO(&rfds);
 		FD_SET(0, &rfds);//stdin
@@ -112,7 +112,7 @@ static void *pthread_routine_client(void *arg)
 				}
 			}
 		} else {
-			print_i("No data, errno{%d:%s}.\n", errno, strerror(errno));
+			//print_i("No data, errno{%d:%s}.\n", errno, strerror(errno));
 		}
 	}
 

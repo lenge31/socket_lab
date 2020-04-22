@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <byteswap.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -76,11 +77,11 @@ static void *pthread_routine_client(void *arg)
 						if (client_infos[i].accept_sfd != -1)
 							print_i("index=%d,accept_sfd=%d, accept_addr(.sin_family=%d, .sin_port=%d, .sin_addr=0x%x)\n",
 								i, client_infos[i].accept_sfd, client_infos[i].accept_addr.sin_family,
-								ntohs(client_infos[i].accept_addr.sin_port), client_infos[i].accept_addr.sin_addr.s_addr);
+								bswap_16(client_infos[i].accept_addr.sin_port), client_infos[i].accept_addr.sin_addr.s_addr);
 					}
 				} else {
 					for (i=0; i<MAX_CONNECT_COUNT; i++) {
-						if (client_infos[i].accept_sfd != -1 && ntohs(client_infos[i].accept_addr.sin_port) == port) break;
+						if (client_infos[i].accept_sfd != -1 && bswap_16(client_infos[i].accept_addr.sin_port) == port) break;
 					}
 					if (i >= MAX_CONNECT_COUNT) {
 						print_e("it can't find port.\n");
@@ -102,11 +103,11 @@ static void *pthread_routine_client(void *arg)
 						memset(recv_buf, 0, MAX_MSG_SIZE);
 						ret = recv(client_infos[i].accept_sfd, recv_buf, MAX_MSG_SIZE, 0);
 						if (ret == 0) {
-							print_i("<%d>client port closed, let it close too.\n", ntohs(client_infos[i].accept_addr.sin_port));
+							print_i("<%d>client port closed, let it close too.\n", bswap_16(client_infos[i].accept_addr.sin_port));
 							close(client_infos[i].accept_sfd);
 							client_infos[i].accept_sfd = -1;
 						} else {
-							print_i("%d<%s", ntohs(client_infos[i].accept_addr.sin_port), recv_buf);
+							print_i("%d<%s", bswap_16(client_infos[i].accept_addr.sin_port), recv_buf);
 						}
 					}
 				}
@@ -142,7 +143,7 @@ int main(int argc, char *argv[])
 
 	getsockname(listen_sfd, (struct sockaddr *)&listen_addr, &ADDRLEN);
 	print_i("listen_sfd=%d, listen_addr(.sin_family=%d, .sin_port=%d, .sin_addr=0x%x)\n",
-			listen_sfd, listen_addr.sin_family, ntohs(listen_addr.sin_port), listen_addr.sin_addr.s_addr);
+			listen_sfd, listen_addr.sin_family, bswap_16(listen_addr.sin_port), listen_addr.sin_addr.s_addr);
 
 	ret = listen(listen_sfd, MAX_CONNECT_COUNT);
 	if (ret == -1) {
@@ -162,7 +163,7 @@ int main(int argc, char *argv[])
 			} else {
 				print_i("index=%d, accept_sfd=%d, accept_addr(.sin_family=%d, .sin_port=%d, .sin_addr=0x%x)\n",
 						i, client_infos[i].accept_sfd, client_infos[i].accept_addr.sin_family,
-						ntohs(client_infos[i].accept_addr.sin_port), client_infos[i].accept_addr.sin_addr.s_addr);
+						bswap_16(client_infos[i].accept_addr.sin_port), client_infos[i].accept_addr.sin_addr.s_addr);
 				if (!pthread_id_client) {
 					ret = pthread_create(&pthread_id_client, NULL, &pthread_routine_client, NULL);
 					if (ret != 0) {

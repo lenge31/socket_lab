@@ -38,7 +38,7 @@ int main(int argc, char *argv[])
 	}
 
 	print_i("server_addr(.sin_family=%d, .sin_port=%d, .sin_addr=0x%x).\n",
-			server_addr.sin_family, ntohs(server_addr.sin_port), server_addr.sin_addr.s_addr);
+			server_addr.sin_family, bswap_16(server_addr.sin_port), server_addr.sin_addr.s_addr);
 
 	client_sfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (client_sfd == -1) {
@@ -58,7 +58,7 @@ int main(int argc, char *argv[])
 		return -errno;
 	}
 	print_i("client_sfd=%d, client_addr(.sin_family=%d, .sin_port=%d, .sin_addr=0x%x).\n",
-			client_sfd, client_addr.sin_family, ntohs(client_addr.sin_port), client_addr.sin_addr.s_addr);
+			client_sfd, client_addr.sin_family, bswap_16(client_addr.sin_port), client_addr.sin_addr.s_addr);
 
 	send_buf = calloc(1, MAX_MSG_SIZE);
 	if (send_buf == NULL) {

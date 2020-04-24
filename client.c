@@ -37,8 +37,10 @@ int main(int argc, char *argv[])
 		server_addr.sin_port = bswap_16(port);
 	}
 
-	print_i("server_addr(.sin_family=%d, .sin_port=%d, .sin_addr=0x%x).\n",
-			server_addr.sin_family, bswap_16(server_addr.sin_port), server_addr.sin_addr.s_addr);
+	print_i("server_addr(.sin_family=%d, .sin_port=0x%x<%d>, .sin_addr=0x%x<%d.%d.%d.%d).\n",
+			server_addr.sin_family, server_addr.sin_port, bswap_16(server_addr.sin_port), server_addr.sin_addr.s_addr, 
+			server_addr.sin_addr.s_addr&0xff, server_addr.sin_addr.s_addr>>8&0xff,
+			server_addr.sin_addr.s_addr>>16&0xff, server_addr.sin_addr.s_addr>>24&0xff);
 
 	client_sfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (client_sfd == -1) {
@@ -51,14 +53,15 @@ int main(int argc, char *argv[])
 		print_e("connect failed, errno{%d:%s}.\n", errno, strerror(errno));
 		return -errno;
 	}
-	print_i("succeed to connect server.\n");
 	ret = getsockname(client_sfd, (struct sockaddr *)&client_addr, &ADDRLEN);
 	if (ret == -1) {
 		print_e("getsockname failed, errno{%d:%s}.\n", errno, strerror(errno));
 		return -errno;
 	}
-	print_i("client_sfd=%d, client_addr(.sin_family=%d, .sin_port=%d, .sin_addr=0x%x).\n",
-			client_sfd, client_addr.sin_family, bswap_16(client_addr.sin_port), client_addr.sin_addr.s_addr);
+	print_i("client_sfd=%d, client_addr(.sin_family=%d, .sin_port=0x%x<%d>, .sin_addr=0x%x<%d.%d.%d.%d>).\n",
+			client_sfd, client_addr.sin_family, client_addr.sin_port, bswap_16(client_addr.sin_port), client_addr.sin_addr.s_addr,
+			client_addr.sin_addr.s_addr&0xff, client_addr.sin_addr.s_addr>>8&0xff,
+			client_addr.sin_addr.s_addr>>16&0xff, client_addr.sin_addr.s_addr>>24&0xff);
 
 	send_buf = calloc(1, MAX_MSG_SIZE);
 	if (send_buf == NULL) {
@@ -72,7 +75,7 @@ int main(int argc, char *argv[])
 	}
 
 	while (1) {
-		tv.tv_sec = 180;
+		tv.tv_sec = 1;
 		tv.tv_usec = 0;
 		FD_ZERO(&rfds);
 		FD_SET(0, &rfds);//stdin
@@ -94,7 +97,7 @@ int main(int argc, char *argv[])
 					memset(recv_buf, 0, MAX_MSG_SIZE);
 					ret = recv(client_sfd, recv_buf, MAX_MSG_SIZE, 0);
 					if (ret == 0) {
-						print_i("server port closed, let client close too.\n");
+						print_i("server closed.\n");
 						close(client_sfd);
 						client_sfd = -1;
 						break;

@@ -10,6 +10,8 @@
 #include <sys/time.h>
 #include <netinet/in.h>
 
+#include <signal.h>
+
 //#define print_i(fmt, ...) printf("%s:"fmt, __func__, ##__VA_ARGS__);
 #define print_i printf
 //#define print_e(fmt, ...) printf("<error>%s:"fmt, __func__, ##__VA_ARGS__);
@@ -22,6 +24,16 @@ static int ADDRLEN = sizeof(struct sockaddr_in);
 
 #define MAX_MSG_SIZE (1024*1024)
 
+static void sig_handler(int signum)
+{
+	char s[256];
+
+	//print_i("signum = %d.\n", signum);
+	if (signum == SIGINT) {
+		print_i("input 'exit' to quit\n");
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	int ret = -1;
@@ -30,6 +42,8 @@ int main(int argc, char *argv[])
 	struct timeval tv;
 	fd_set rfds;
 	unsigned int port, addr_1, addr_2, addr_3, addr_4;
+
+	signal(SIGINT, sig_handler);
 
 	if (argc == 2) {
 		sscanf(argv[1], "%d.%d.%d.%d:%d", &addr_1, &addr_2, &addr_3, &addr_4, &port);
@@ -83,6 +97,7 @@ int main(int argc, char *argv[])
 
 		ret = select(FD_SETSIZE, &rfds, NULL, NULL, &tv);
 		if (ret == -1) {
+			if (errno == EINTR) continue;
 			print_e("select failed, errno{%d:%s}.\n", errno, strerror(errno));
 		} else if (ret) {
 			if (FD_ISSET(0, &rfds)) {//stdin

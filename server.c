@@ -13,6 +13,8 @@
 
 #include <pthread.h>
 
+#include <signal.h>
+
 //#define print_i(fmt, ...) printf("%s:"fmt, __func__, ##__VA_ARGS__)
 #define print_i printf
 //#define print_e(fmt, ...) printf("<error>%s:"fmt, __func__, ##__VA_ARGS__)
@@ -77,6 +79,7 @@ static void *pthread_routine_client(void *arg)
 
 		ret = select(FD_SETSIZE, &rfds, NULL, NULL, &tv);
 		if (ret == -1) {
+			if (errno == EINTR) continue;
 			print_e("select failed, errno{%d:%s}.\n", errno, strerror(errno));
 		} else if (ret) {
 			if (FD_ISSET(0, &rfds)) {//stdin
@@ -139,7 +142,8 @@ static void *pthread_routine_client(void *arg)
 							FD_SET(client_infos[i].accept_sfd, &wfds);
 							ret = select(FD_SETSIZE, NULL, &wfds, NULL, &tv);
 							if (ret == -1) {
-								print_e("select failed, errno{%d:%s}.\n", errno, strerror(errno));
+								if (errno != EINTR)
+									print_e("select failed, errno{%d:%s}.\n", errno, strerror(errno));
 							} else {
 								ret = send(client_infos[i].accept_sfd, HELLO, strlen(HELLO), 0);
 								if (ret == -1) {
@@ -193,10 +197,22 @@ static void *pthread_routine_client(void *arg)
 	return NORMAL_EXIT;
 }
 
+static void sig_handler(int signum)
+{
+	char s[256];
+
+	//print_i("signum = %d.\n", signum);
+	if (signum == SIGINT) {
+		print_i("input 'exit' to quit\n");
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	int ret = -1, i = 0;
 	void *res = NULL;
+
+	signal(SIGINT, sig_handler);
 
 	listen_sfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (listen_sfd == -1) {
@@ -233,7 +249,7 @@ int main(int argc, char *argv[])
 	if (ret != 0) {
 		print_e("pthread_join failed, errno{%d:%s}.\n", ret, strerror(ret));
 	}
-	print_i("joined with thread 0x%lx(%s)\n", pthread_id_client, (char *)res);
+	print_i("joined with thread 0x%lx(%s).\n", pthread_id_client, (char *)res);
 	pthread_id_client = 0;
 	//free(res);
 

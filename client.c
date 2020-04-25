@@ -88,6 +88,9 @@ int main(int argc, char *argv[])
 			if (FD_ISSET(0, &rfds)) {//stdin
 				memset(send_buf, 0, MAX_MSG_SIZE);
 				read(0, send_buf, MAX_MSG_SIZE);
+				if (strcmp("exit\n", send_buf) == 0) {
+					break;//normally exit
+				}
 				ret = send(client_sfd, send_buf, strlen(send_buf), 0);
 				if (ret == -1) {
 					print_e("send failed, errno{%d:%s}.\n", errno, strerror(errno));
@@ -98,8 +101,6 @@ int main(int argc, char *argv[])
 					ret = recv(client_sfd, recv_buf, MAX_MSG_SIZE, 0);
 					if (ret == 0) {
 						print_i("server closed.\n");
-						close(client_sfd);
-						client_sfd = -1;
 						break;
 					} else {
 						print_i("%s", recv_buf);
@@ -111,8 +112,9 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	free(send_buf);
-	free(recv_buf);
+	free(send_buf); send_buf = NULL;
+	free(recv_buf); recv_buf = NULL;
+	close(client_sfd); client_sfd= -1;
 
 	return 0;
 }

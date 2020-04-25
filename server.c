@@ -34,7 +34,7 @@ static struct client_info client_infos[MAX_CONNECT_COUNT];
 static pthread_t pthread_id_client = 0;
 #define MAX_MSG_SIZE (1024*1024)
 #define ERR_EXIT "abnormal exit"
-#define NORMAL_EXIT "normal exit"
+#define NORMAL_EXIT "normally exit"
 static void *pthread_routine_client(void *arg)
 {
 	int ret = -1, i = 0, j = 0, offset = 0, index = 0;
@@ -46,7 +46,7 @@ static void *pthread_routine_client(void *arg)
 	int reject_accept = -1;
 	struct sockaddr_in addr;
 
-	print_i("start thread(0x%lx).\n", pthread_id_client);
+	print_i("start thread 0x%lx.\n", pthread_id_client);
 
 	send_buf = calloc(1, MAX_MSG_SIZE);
 	if (send_buf == NULL) {
@@ -84,6 +84,9 @@ static void *pthread_routine_client(void *arg)
 				read(0, send_buf, MAX_MSG_SIZE);
 				ret = sscanf(send_buf, "%d>", &index);
 				if (ret != 1) {
+					if (strcmp("exit\n", send_buf) == 0) {
+						break;//normally exit
+					}
 					print_i("stdin format error. should be {index>string}.\n");
 					for (i=0; i<MAX_CONNECT_COUNT; i++) {
 						if (client_infos[i].accept_sfd >= 0)
@@ -132,6 +135,7 @@ static void *pthread_routine_client(void *arg)
 							   setsockopt(client_infos[i].accept_sfd, SOL_SOCKET, SO_KEEPALIVE, &opt_int, sizeof(opt_int));
 							   setsockopt(client_infos[i].accept_sfd, IPPROTO_TCP, TCP_NODELAY, &opt_int, sizeof(opt_int));
 							 */
+							FD_ZERO(&wfds);
 							FD_SET(client_infos[i].accept_sfd, &wfds);
 							ret = select(FD_SETSIZE, NULL, &wfds, NULL, &tv);
 							if (ret == -1) {
@@ -146,7 +150,7 @@ static void *pthread_routine_client(void *arg)
 						}
 					}
 				}
-				if (i >= MAX_CONNECT_COUNT) {//poll idle connect
+				if (i >= MAX_CONNECT_COUNT) {
 					print_i("reach to max connect count(%d), can't accept.\n", MAX_CONNECT_COUNT);
 					reject_accept = accept(listen_sfd, (struct sockaddr *)&addr, &ADDRLEN);
 					if (reject_accept >= 0) {
@@ -177,8 +181,14 @@ static void *pthread_routine_client(void *arg)
 		}
 	}
 
-	free(send_buf);
-	free(recv_buf);
+	free(send_buf); send_buf = NULL;
+	free(recv_buf); recv_buf = NULL;
+	close(listen_sfd); listen_sfd = -1;
+	for (i=0; i<MAX_CONNECT_COUNT; i++) {
+		if (client_infos[i].accept_sfd >= 0) {
+			close(client_infos[i].accept_sfd); client_infos[i].accept_sfd = -1;
+		}
+	}
 
 	return NORMAL_EXIT;
 }
@@ -223,7 +233,7 @@ int main(int argc, char *argv[])
 	if (ret != 0) {
 		print_e("pthread_join failed, errno{%d:%s}.\n", ret, strerror(ret));
 	}
-	print_i("joined with thread 0x%lx; returned value was %s\n", pthread_id_client, (char *)res);
+	print_i("joined with thread 0x%lx(%s)\n", pthread_id_client, (char *)res);
 	pthread_id_client = 0;
 	//free(res);
 

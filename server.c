@@ -15,15 +15,10 @@
 
 #include <signal.h>
 
-//#define print_i(fmt, ...) printf("%s:"fmt, __func__, ##__VA_ARGS__)
-#define print_i printf
-//#define print_e(fmt, ...) printf("<error>%s:"fmt, __func__, ##__VA_ARGS__)
-#define print_e(fmt, ...) printf("<error>:"fmt, ##__VA_ARGS__)
+#include "common.h"
 
 static int listen_sfd = -1;
 struct sockaddr_in listen_addr = {AF_INET, 0xE407, {0x0}};
-static int ADDRLEN = sizeof(struct sockaddr_in);
-//struct sockaddr_in listen_addr = {AF_INET, 0xE407, {0x692AA8C0}};
 #define MAX_CONNECT_COUNT 2
 struct client_info {
 	int accept_sfd;
@@ -37,6 +32,7 @@ static pthread_t pthread_id_client = 0;
 #define MAX_MSG_SIZE (1024*1024)
 #define ERR_EXIT "abnormal exit"
 #define NORMAL_EXIT "normally exit"
+
 static void *pthread_routine_client(void *arg)
 {
 	int ret = -1, i = 0, j = 0, offset = 0, index = 0;
@@ -47,21 +43,16 @@ static void *pthread_routine_client(void *arg)
 	int opt_int = 0;
 	int reject_accept = -1;
 	struct sockaddr_in addr;
+	char *res = NULL;
 
 	print_i("start thread 0x%lx.\n", pthread_id_client);
 
 	send_buf = calloc(1, MAX_MSG_SIZE);
-	if (send_buf == NULL) {
-		print_e("calloc send_buf failed, errno{%d:%s}.\n", errno, strerror(errno));
-		return ERR_EXIT;
-	}
-	recv_buf = calloc(1, MAX_MSG_SIZE);
-	if (recv_buf == NULL) {
-		print_e("calloc recv_buf failed, errno{%d:%s}.\n", errno, strerror(errno));
-		return ERR_EXIT;
-	}
+	if (send_buf == NULL) errno_goto_out("calloc send_buf");
 
-	memset(&client_infos, 0, sizeof(client_infos));
+	recv_buf = calloc(1, MAX_MSG_SIZE);
+	if (recv_buf == NULL) errno_goto_out("calloc recv_buf");
+
 	for (i=0; i<MAX_CONNECT_COUNT; i++) {
 		client_infos[i].accept_sfd = -1;
 	}
@@ -80,25 +71,26 @@ static void *pthread_routine_client(void *arg)
 		ret = select(FD_SETSIZE, &rfds, NULL, NULL, &tv);
 		if (ret == -1) {
 			if (errno == EINTR) continue;
-			print_e("select failed, errno{%d:%s}.\n", errno, strerror(errno));
+			errno_info("select");
 		} else if (ret) {
 			if (FD_ISSET(0, &rfds)) {//stdin
 				memset(send_buf, 0, MAX_MSG_SIZE);
 				read(0, send_buf, MAX_MSG_SIZE);
-				ret = sscanf(send_buf, "%d>", &index);
+				ret = sscanf(send_buf, "%d", &index);
 				if (ret != 1) {
 					if (strcmp("exit\n", send_buf) == 0) {
-						break;//normally exit
+						res = NORMAL_EXIT;
+						goto out;//normally exit
 					}
-					print_i("stdin format error. should be {index>string}.\n");
+					print_i("stdin format:\n"
+							"\tmessage {index>string}.\n"
+						"client list:\n"
+					       );
 					for (i=0; i<MAX_CONNECT_COUNT; i++) {
-						if (client_infos[i].accept_sfd >= 0)
-							print_i("index=%d,accept_sfd=%d, accept_addr(.sin_family=%d, .sin_port=0x%x<%d>, .sin_addr=0x%x<%d.%d.%d.%d>)\n",
-								i, client_infos[i].accept_sfd, client_infos[i].accept_addr.sin_family,
-								client_infos[i].accept_addr.sin_port, bswap_16(client_infos[i].accept_addr.sin_port),
-								client_infos[i].accept_addr.sin_addr.s_addr, client_infos[i].accept_addr.sin_addr.s_addr&0xff,
-								client_infos[i].accept_addr.sin_addr.s_addr>>8&0xff, client_infos[i].accept_addr.sin_addr.s_addr>>16&0xff,
-								client_infos[i].accept_addr.sin_addr.s_addr>>24&0xff);
+						if (client_infos[i].accept_sfd >= 0) {
+							print_i("\t%d", i);
+							dump_socketaddr_info("", &client_infos[i].accept_addr);
+						}
 					}
 				} else {
 					if (index >= MAX_CONNECT_COUNT || client_infos[index].accept_sfd < 0) {
@@ -109,9 +101,7 @@ static void *pthread_routine_client(void *arg)
 						if (offset < MAX_MSG_SIZE) {
 							offset++;
 							ret = send(client_infos[index].accept_sfd, send_buf+offset, strlen(send_buf+offset), 0);
-							if (ret == -1) {
-								print_e("send failed, errno{%d:%s}.\n", errno, strerror(errno));
-							}
+							if (ret == -1) errno_info("send");
 						}
 					}
 				}
@@ -121,16 +111,10 @@ static void *pthread_routine_client(void *arg)
 				for (i=0; i<MAX_CONNECT_COUNT; i++) {
 					if (client_infos[i].accept_sfd < 0) {
 						client_infos[i].accept_sfd = accept(listen_sfd, (struct sockaddr *)&client_infos[i].accept_addr, &ADDRLEN);
-						if (client_infos[i].accept_sfd == -1) {
-							print_e("accept failed, errno{%d:%s}.\n", errno, strerror(errno));
-						} else {
-							print_i("index=%d, accept_sfd=%d, accept_addr(.sin_family=%d, .sin_port=0x%x<%d>, .sin_addr=0x%x<%d.%d.%d.%d>)\n",
-									i, client_infos[i].accept_sfd, client_infos[i].accept_addr.sin_family,
-									client_infos[i].accept_addr.sin_port, bswap_16(client_infos[i].accept_addr.sin_port),
-									client_infos[i].accept_addr.sin_addr.s_addr, client_infos[i].accept_addr.sin_addr.s_addr&0xff,
-									client_infos[i].accept_addr.sin_addr.s_addr>>8&0xff,
-									client_infos[i].accept_addr.sin_addr.s_addr>>16&0xff,
-									client_infos[i].accept_addr.sin_addr.s_addr>>24&0xff);
+						if (client_infos[i].accept_sfd == -1) errno_info("accept")
+						else {
+							print_i("index=%d, accept_sfd=%d", i, client_infos[i].accept_sfd);
+							dump_socketaddr_info("", &client_infos[i].accept_addr);
 							/*
 							   opt_int = 0;
 							   setsockopt(client_infos[i].accept_sfd, IPPROTO_TCP, TCP_CORK, &opt_int, sizeof(opt_int));
@@ -143,12 +127,10 @@ static void *pthread_routine_client(void *arg)
 							ret = select(FD_SETSIZE, NULL, &wfds, NULL, &tv);
 							if (ret == -1) {
 								if (errno != EINTR)
-									print_e("select failed, errno{%d:%s}.\n", errno, strerror(errno));
+									errno_info("select");
 							} else {
 								ret = send(client_infos[i].accept_sfd, HELLO, strlen(HELLO), 0);
-								if (ret == -1) {
-									print_e("send failed, errno{%d:%s}.\n", errno, strerror(errno));
-								}
+								if (ret == -1) errno_info("send");
 							}
 							break;
 						}
@@ -185,9 +167,10 @@ static void *pthread_routine_client(void *arg)
 		}
 	}
 
-	free(send_buf); send_buf = NULL;
-	free(recv_buf); recv_buf = NULL;
-	close(listen_sfd); listen_sfd = -1;
+out:
+	if (send_buf != NULL) { free(send_buf); send_buf = NULL; }
+	if (recv_buf != NULL) { free(recv_buf); recv_buf = NULL; }
+	if (listen_sfd >= 0) { close(listen_sfd); listen_sfd = -1; }
 	for (i=0; i<MAX_CONNECT_COUNT; i++) {
 		if (client_infos[i].accept_sfd >= 0) {
 			close(client_infos[i].accept_sfd); client_infos[i].accept_sfd = -1;
@@ -199,11 +182,9 @@ static void *pthread_routine_client(void *arg)
 
 static void sig_handler(int signum)
 {
-	char s[256];
-
 	//print_i("signum = %d.\n", signum);
 	if (signum == SIGINT) {
-		print_i("input 'exit' to quit\n");
+		print_i("\b\binput 'exit' to quit.\n");
 	}
 }
 
@@ -215,43 +196,28 @@ int main(int argc, char *argv[])
 	signal(SIGINT, sig_handler);
 
 	listen_sfd = socket(AF_INET, SOCK_STREAM, 0);
-	if (listen_sfd == -1) {
-		print_e("socket failed, errno{%d:%s}.\n", errno, strerror(errno));
-		return -errno;
-	} else {
-	}
+	if (listen_sfd == -1) errno_goto_out("socket");
 
 	ret = bind(listen_sfd, (struct sockaddr *)&listen_addr, ADDRLEN);
-	if (ret == -1) {
-		print_e("bind failed, errno{%d:%s}.\n", errno, strerror(errno));
-		return -errno;
-	}
+	if (ret == -1) errno_goto_out("bind");
 
 	getsockname(listen_sfd, (struct sockaddr *)&listen_addr, &ADDRLEN);
-	print_i("listen_sfd=%d, listen_addr(.sin_family=%d, .sin_port=0x%x<%d>, .sin_addr=0x%x<%d.%d.%d.%d>)\n",
-			listen_sfd, listen_addr.sin_family, listen_addr.sin_port, bswap_16(listen_addr.sin_port),
-			listen_addr.sin_addr.s_addr, listen_addr.sin_addr.s_addr&0xff, listen_addr.sin_addr.s_addr>>8&0xff,
-			listen_addr.sin_addr.s_addr>>16&0xff, listen_addr.sin_addr.s_addr>>24&0xff);
+	dump_socket_info("listen socket", listen_sfd);
 
 	ret = listen(listen_sfd, MAX_CONNECT_COUNT);
-	if (ret == -1) {
-		print_e("listen failed, errno{%d:%s}.\n", errno, strerror(errno));
-		return -errno;
-	}
+	if (ret == -1) errno_goto_out("listen");
 
 	ret = pthread_create(&pthread_id_client, NULL, &pthread_routine_client, NULL);
-	if (ret != 0) {
-		print_e("pthread_create failed, errno{%d:%s}.\n", ret, strerror(ret));
-		return -ret;
-	}
+	if (ret != 0) errno_goto_out("pthread_create");
 
 	ret = pthread_join(pthread_id_client, &res);
-	if (ret != 0) {
-		print_e("pthread_join failed, errno{%d:%s}.\n", ret, strerror(ret));
-	}
+	if (ret != 0) errno_goto_out("pthread_join");
 	print_i("joined with thread 0x%lx(%s).\n", pthread_id_client, (char *)res);
+
+out:
 	pthread_id_client = 0;
 	//free(res);
+	if (listen_sfd >= 0) { close(listen_sfd); listen_sfd = -1; }
 
 	return 0;
 }

@@ -12,25 +12,19 @@
 
 #include <signal.h>
 
-//#define print_i(fmt, ...) printf("%s:"fmt, __func__, ##__VA_ARGS__);
-#define print_i printf
-//#define print_e(fmt, ...) printf("<error>%s:"fmt, __func__, ##__VA_ARGS__);
-#define print_e(fmt, ...) printf("<error>:"fmt, ##__VA_ARGS__);
+#include "common.h"
 
 static int client_sfd = -1;
 static struct sockaddr_in client_addr = {0, 0, {0x0}};
 struct sockaddr_in server_addr = {AF_INET, 0xE407, {0x0}};
-static int ADDRLEN = sizeof(struct sockaddr_in);
 
 #define MAX_MSG_SIZE (1024*1024)
 
 static void sig_handler(int signum)
 {
-	char s[256];
-
 	//print_i("signum = %d.\n", signum);
 	if (signum == SIGINT) {
-		print_i("input 'exit' to quit\n");
+		print_i("input 'exit' to quit.\n");
 	}
 }
 
@@ -51,42 +45,21 @@ int main(int argc, char *argv[])
 		server_addr.sin_port = bswap_16(port);
 	}
 
-	print_i("server_addr(.sin_family=%d, .sin_port=0x%x<%d>, .sin_addr=0x%x<%d.%d.%d.%d).\n",
-			server_addr.sin_family, server_addr.sin_port, bswap_16(server_addr.sin_port), server_addr.sin_addr.s_addr, 
-			server_addr.sin_addr.s_addr&0xff, server_addr.sin_addr.s_addr>>8&0xff,
-			server_addr.sin_addr.s_addr>>16&0xff, server_addr.sin_addr.s_addr>>24&0xff);
+	dump_socketaddr_info("server", &server_addr);
 
 	client_sfd = socket(AF_INET, SOCK_STREAM, 0);
-	if (client_sfd == -1) {
-		print_e("socket failed, errno{%d:%s}.\n", errno, strerror(errno));
-		return -errno;
-	}
+	if (client_sfd == -1) errno_goto_out("socket");
 
 	ret = connect(client_sfd, (struct sockaddr *)&server_addr, ADDRLEN);
-	if (ret == -1) {
-		print_e("connect failed, errno{%d:%s}.\n", errno, strerror(errno));
-		return -errno;
-	}
-	ret = getsockname(client_sfd, (struct sockaddr *)&client_addr, &ADDRLEN);
-	if (ret == -1) {
-		print_e("getsockname failed, errno{%d:%s}.\n", errno, strerror(errno));
-		return -errno;
-	}
-	print_i("client_sfd=%d, client_addr(.sin_family=%d, .sin_port=0x%x<%d>, .sin_addr=0x%x<%d.%d.%d.%d>).\n",
-			client_sfd, client_addr.sin_family, client_addr.sin_port, bswap_16(client_addr.sin_port), client_addr.sin_addr.s_addr,
-			client_addr.sin_addr.s_addr&0xff, client_addr.sin_addr.s_addr>>8&0xff,
-			client_addr.sin_addr.s_addr>>16&0xff, client_addr.sin_addr.s_addr>>24&0xff);
+	if (ret == -1) errno_goto_out("connect");
+
+	dump_socket_info("client socket", client_sfd);
 
 	send_buf = calloc(1, MAX_MSG_SIZE);
-	if (send_buf == NULL) {
-		print_e("calloc send_buf failed, errno{%d:%s}.\n", errno, strerror(errno));
-		return -errno;
-	}
+	if (send_buf == NULL) errno_goto_out("calloc send_buf");
+
 	recv_buf = calloc(1, MAX_MSG_SIZE);
-	if (recv_buf == NULL) {
-		print_e("calloc recv_buf failed, errno{%d:%s}.\n", errno, strerror(errno));
-		return -errno;
-	}
+	if (recv_buf == NULL) errno_goto_out("calloc recv_buf");
 
 	while (1) {
 		tv.tv_sec = 1;
@@ -98,7 +71,7 @@ int main(int argc, char *argv[])
 		ret = select(FD_SETSIZE, &rfds, NULL, NULL, &tv);
 		if (ret == -1) {
 			if (errno == EINTR) continue;
-			print_e("select failed, errno{%d:%s}.\n", errno, strerror(errno));
+			errno_info("select");
 		} else if (ret) {
 			if (FD_ISSET(0, &rfds)) {//stdin
 				memset(send_buf, 0, MAX_MSG_SIZE);
@@ -106,10 +79,16 @@ int main(int argc, char *argv[])
 				if (strcmp("exit\n", send_buf) == 0) {
 					break;//normally exit
 				}
-				ret = send(client_sfd, send_buf, strlen(send_buf), 0);
-				if (ret == -1) {
-					print_e("send failed, errno{%d:%s}.\n", errno, strerror(errno));
+
+				if (send_buf[0] != '>') {
+					print_i("stdin format:\n"
+							"\tmessage {index>string}.\n"
+					       );
+					continue;
 				}
+
+				ret = send(client_sfd, send_buf+1, strlen(send_buf+1), 0);
+				if (ret == -1) errno_info("send");
 			} else {//client
 				if (FD_ISSET(client_sfd, &rfds)) {
 					memset(recv_buf, 0, MAX_MSG_SIZE);
@@ -118,18 +97,18 @@ int main(int argc, char *argv[])
 						print_i("server closed.\n");
 						break;
 					} else {
-						print_i("%s", recv_buf);
+						print_i("<%s", recv_buf);
 					}
 				}
 			}
-		} else {
-			//print_i("No data, errno{%d:%s}.\n", errno, strerror(errno));
+		} else {//No data
 		}
 	}
 
-	free(send_buf); send_buf = NULL;
-	free(recv_buf); recv_buf = NULL;
-	close(client_sfd); client_sfd= -1;
+out:
+	if (send_buf != NULL) { free(send_buf); send_buf = NULL; }
+	if (recv_buf != NULL) { free(recv_buf); recv_buf = NULL; }
+	if (client_sfd >= 0) { close(client_sfd); client_sfd= -1; }
 
 	return 0;
 }

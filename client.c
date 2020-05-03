@@ -1,114 +1,141 @@
-#include <stdio.h>
-#include <errno.h>
-#include <string.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <byteswap.h>
-
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <netinet/in.h>
-
-#include <signal.h>
-
 #include "common.h"
 
-static int client_sfd = -1;
-static struct sockaddr_in client_addr = {0, 0, {0x0}};
-struct sockaddr_in server_addr = {AF_INET, 0xE407, {0x0}};
+static struct tcp_client_port msg_client_port;
 
-#define MAX_MSG_SIZE (1024*1024)
+#define NORMAL_EXIT "normal exit"
+static pthread_t pthread_msg_client = 0;
+static void *pthread_msg_client_routine(void * arg)
+{
+	char *res = NORMAL_EXIT;
+	int ret = 0;
+
+	while (!msg_client_port.exit) {
+		ret = tcp_client_port_recv_poll(&msg_client_port);
+		errno_info("poll");
+		if (ret == -1) errno_info("poll")
+		else {
+			tcp_client_port_in(&msg_client_port);
+			tcp_client_port_recv_handle(&msg_client_port);
+		}
+	}
+	
+	return res;
+} 
 
 static void sig_handler(int signum)
 {
-	//print_i("signum = %d.\n", signum);
+	int len = 0;
+	char tmp_buf[MAX_MSG_LEN];
+
 	if (signum == SIGINT) {
-		print_i("input 'exit' to quit.\n");
+		len  = sprintf(tmp_buf, "input 'exit' to quit.\n");
+		msg_client_port.out_func(&msg_client_port, tmp_buf, len, 0);
 	}
+}
+
+static int msg_client_in_func(struct tcp_client_port *port, char *buf, int count)
+{
+	int ret = -1;
+	char tmp_buf[MAX_MSG_LEN];
+
+	if (strncmp("exit\n", buf, strlen("exit\n")) == 0) {
+		port->exit = 1;
+	} else if (strcmp("list cmd\n", buf) == 0) {
+	} else if (strncmp(buf, MSG_PREFIX, strlen(MSG_PREFIX)) == 0) {
+		ret = poll_write(port->sfd, buf, count);
+
+		ret = port->out_func(port, buf+2, count-2, 1);//echo
+	} else if (strncmp(buf, CMD_PREFIX, strlen(CMD_PREFIX)) == 0) {
+		ret = poll_write(port->sfd, buf, count);
+
+		ret  = port->out_func(port, buf+2, count-2, 1);//echo
+	} else {
+		sprintf(tmp_buf,"\n" 
+				"[list cmd]\tlist all cmd.\n",
+				"[>>msg]\t\tsend msg.\n",
+				"[>!cmd]\t\tsend cmd.\n"
+		       );
+		ret  = port->out_func(port, buf, count, 0);
+	}
+
+	return ret;
+}
+static int msg_client_out_func(struct tcp_client_port *port, char *buf, int count, int to_server)
+{
+	int ret = -1;
+	int index = 0;
+	int len = 0;
+	char tmp_buf[MAX_MSG_LEN*2];
+	char dd[3] = {'>', '>', '\0'};
+	int skip = 0;
+
+	if (buf == NULL) return ret;
+	buf[count] = '\0';
+
+	if (strncmp(buf, MSG_PREFIX, strlen(MSG_PREFIX)) == 0) {
+		dd[0] = '<';
+		dd[1] = '<';
+		skip = 2;
+	} else if(strncmp(buf, CMD_PREFIX, strlen(CMD_PREFIX)) == 0) {
+		dd[0] = '<';
+		dd[1] = '!';
+		skip = 2;
+	}
+
+	if (to_server)
+		len = sprintf(tmp_buf, "%s %s %s:: %s", port->id, dd, port->server_id, buf+skip);
+	else
+		len = sprintf(tmp_buf, "%s:: %s", port->id, buf+skip);
+	
+	ret = poll_write(port->out_fd, tmp_buf, len);
+
+	return ret;
 }
 
 int main(int argc, char *argv[])
 {
 	int ret = -1;
-	char *send_buf = NULL;
-	char *recv_buf = NULL;
-	struct timeval tv;
-	fd_set rfds;
-	unsigned int port, addr_1, addr_2, addr_3, addr_4;
+	int addr_1=0, addr_2=0, addr_3=0, addr_4=0, port=0;
+	void *res = NULL;
 
-	signal(SIGINT, sig_handler);
+	tcp_client_port_initialize(&msg_client_port);
 
 	if (argc == 2) {
 		sscanf(argv[1], "%d.%d.%d.%d:%d", &addr_1, &addr_2, &addr_3, &addr_4, &port);
-		server_addr.sin_addr.s_addr = ((addr_4&0xff)<<24)|((addr_3&0xff)<<16)|((addr_2&0xff)<<8)|(addr_1&0xff);
-		server_addr.sin_port = bswap_16(port);
+		msg_client_port.server_addr.sin_addr.s_addr = ((addr_4&0xff)<<24)|((addr_3&0xff)<<16)|((addr_2&0xff)<<8)|(addr_1&0xff);
+		msg_client_port.server_addr.sin_port = bswap_16(port);
+	} else {
+		msg_client_port.server_addr.sin_addr.s_addr = 0;
+		msg_client_port.server_addr.sin_port = bswap_16(2020);
 	}
+	msg_client_port.server_addr.sin_family = AF_INET;
+	socketaddr_ip_port(&msg_client_port.server_addr, msg_client_port.server_id);
+	log_i("server is %s.\n", msg_client_port.server_id);
 
-	dump_socketaddr_info("server", &server_addr);
+	msg_client_port.sfd = socket(AF_INET, SOCK_STREAM, 0);
+	if (msg_client_port.sfd == -1) errno_return("socket");
 
-	client_sfd = socket(AF_INET, SOCK_STREAM, 0);
-	if (client_sfd == -1) errno_goto_out("socket");
+	msg_client_port.in_fd = 0;
+	msg_client_port.in_func = msg_client_in_func;
+	msg_client_port.out_fd = 1;
+	msg_client_port.out_func = msg_client_out_func;
 
-	ret = connect(client_sfd, (struct sockaddr *)&server_addr, ADDRLEN);
-	if (ret == -1) errno_goto_out("connect");
+	ret = connect(msg_client_port.sfd, (struct sockaddr *)&msg_client_port.server_addr, ADDR_IN_LEN);
+	if (ret == -1) errno_return("connect");
 
-	dump_socket_info("client socket", client_sfd);
+	socket_ip_port(msg_client_port.sfd, msg_client_port.id);
+	log_i("client is %s.\n", msg_client_port.id);
 
-	send_buf = calloc(1, MAX_MSG_SIZE);
-	if (send_buf == NULL) errno_goto_out("calloc send_buf");
+	ret = pthread_create(&pthread_msg_client, NULL, &pthread_msg_client_routine, NULL);
+	if (ret != 0) log_i("pthread_create failed<%d>.\n", ret);
 
-	recv_buf = calloc(1, MAX_MSG_SIZE);
-	if (recv_buf == NULL) errno_goto_out("calloc recv_buf");
+	signal(SIGINT, sig_handler);
 
-	while (1) {
-		tv.tv_sec = 1;
-		tv.tv_usec = 0;
-		FD_ZERO(&rfds);
-		FD_SET(0, &rfds);//stdin
-		FD_SET(client_sfd, &rfds);//client
-
-		ret = select(FD_SETSIZE, &rfds, NULL, NULL, &tv);
-		if (ret == -1) {
-			if (errno == EINTR) continue;
-			errno_info("select");
-		} else if (ret) {
-			if (FD_ISSET(0, &rfds)) {//stdin
-				memset(send_buf, 0, MAX_MSG_SIZE);
-				read(0, send_buf, MAX_MSG_SIZE);
-				if (strcmp("exit\n", send_buf) == 0) {
-					break;//normally exit
-				}
-
-				if (send_buf[0] != '>') {
-					print_i("stdin format:\n"
-							"\tmessage {index>string}.\n"
-					       );
-					continue;
-				}
-
-				ret = send(client_sfd, send_buf+1, strlen(send_buf+1), 0);
-				if (ret == -1) errno_info("send");
-			} else {//client
-				if (FD_ISSET(client_sfd, &rfds)) {
-					memset(recv_buf, 0, MAX_MSG_SIZE);
-					ret = recv(client_sfd, recv_buf, MAX_MSG_SIZE, 0);
-					if (ret == 0) {
-						print_i("server closed.\n");
-						break;
-					} else {
-						print_i("<%s", recv_buf);
-					}
-				}
-			}
-		} else {//No data
-		}
-	}
-
-out:
-	if (send_buf != NULL) { free(send_buf); send_buf = NULL; }
-	if (recv_buf != NULL) { free(recv_buf); recv_buf = NULL; }
-	if (client_sfd >= 0) { close(client_sfd); client_sfd= -1; }
+	ret = pthread_join(pthread_msg_client, &res);
+	if (ret != 0) log_i("pthread_join failed<%d>.\n", ret, strerror(errno));
+	log_i("joined with thread 0x%lx(%s).\n", pthread_msg_client, (char *)res);
+	
+	tcp_client_port_clean(&msg_client_port);
 
 	return 0;
 }
